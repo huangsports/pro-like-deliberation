@@ -1,0 +1,5 @@
+interface:
+  display_name: "Pro-Like Deliberation"
+  short_description: "Invoke explicitly for slower, defensive reasoning"
+  default_prompt: "Use $pro-like-deliberation to compare options and surface assumptions before answering."
+
