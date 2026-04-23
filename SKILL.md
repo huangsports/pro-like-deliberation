@@ -1,6 +1,6 @@
 ---
 name: pro-like-deliberation
-description: Use when the user explicitly invokes `$pro-like-deliberation` or explicitly asks for slower, deeper, or more defensive reasoning on a task that benefits from visible framing, assumption management, and verified-versus-inferred separation.
+description: Use when the user explicitly invokes `$pro-like-deliberation` and wants a slower, more defensive reasoning workflow with visible framing, assumption management, and verified-versus-inferred separation.
 ---
 
 # Pro-Like Deliberation
@@ -40,7 +40,7 @@ Do not suppress required workflows such as:
 Supported entry paths:
 
 1. the user explicitly invokes `$pro-like-deliberation`
-2. the user explicitly asks for slower, deeper, more rigorous, or more defensive reasoning
+2. the user explicitly invokes `$pro-like-deliberation` in natural language while asking for slower, deeper, more rigorous, or more defensive reasoning
 
 Not part of the supported contract:
 
@@ -119,4 +119,3 @@ When explicitly invoked on a routine task, bias toward:
 - brevity
 - directness
 - minimal ceremony
-

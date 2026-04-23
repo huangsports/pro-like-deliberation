@@ -175,14 +175,20 @@ Less useful:
 
 This package is documented and distributed as an **explicit-invocation-only** skill.
 
-Current validated boundaries:
+Repository-structure validation was run locally on `2026-04-23` with:
+
+```bash
+python3 "$CODEX_HOME/skills/.system/skill-creator/scripts/quick_validate.py" '<repo-root>'
+```
+
+Current validated package boundaries:
 
 - local package structure validates successfully
 - the skill is packaged for explicit `$pro-like-deliberation` usage
 - this repository does not claim auto-trigger support
 - this repository does not claim any hidden model upgrade
 
-What this status does **not** prove:
+What this package-validation status does **not** prove:
 
 - universal host-side implicit routing
 - automatic activation on all difficult prompts
@@ -199,4 +205,3 @@ Contribution baseline:
 - preserve the explicit-invocation-only contract
 - do not add true-Pro, hidden-compute, or auto-trigger marketing claims
 - keep changes falsifiable and easy to verify
-
