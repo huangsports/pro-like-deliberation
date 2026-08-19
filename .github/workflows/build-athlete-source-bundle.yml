@@ -1,0 +1,108 @@
+name: Build athlete monitoring source bundle
+
+on:
+  push:
+    branches:
+      - automation/source-bundle-20260819
+    paths:
+      - .github/workflows/build-athlete-source-bundle.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Prepare workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/bundle/repositories work/bundle/metadata
+
+      - name: Download public source snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/work/bundle"
+          LOG="$ROOT/metadata/download.log"
+          : > "$LOG"
+
+          fetch_repo() {
+            local dir="$1" repo="$2" branch="$3" license="$4"
+            local dest="$ROOT/repositories/$dir"
+            echo "[$(date -u +%FT%TZ)] Fetching $repo ($branch)" | tee -a "$LOG"
+            rm -rf "$dest"
+            if git clone --depth 1 --single-branch --branch "$branch" --recurse-submodules --shallow-submodules "https://github.com/$repo.git" "$dest" 2>&1 | tee -a "$LOG"; then
+              true
+            else
+              echo "Recursive clone failed; retrying without submodules: $repo" | tee -a "$LOG"
+              rm -rf "$dest"
+              git clone --depth 1 --single-branch --branch "$branch" "https://github.com/$repo.git" "$dest" 2>&1 | tee -a "$LOG"
+            fi
+            (
+              cd "$dest"
+              {
+                echo "repository=$repo"
+                echo "source_url=https://github.com/$repo"
+                echo "branch=$branch"
+                echo "license_declared=$license"
+                echo "commit=$(git rev-parse HEAD)"
+                echo "commit_date=$(git show -s --format=%cI HEAD)"
+                echo "commit_subject=$(git show -s --format=%s HEAD)"
+                git submodule status --recursive 2>/dev/null | sed 's/^/submodule=/' || true
+              } > SOURCE_METADATA.txt
+            )
+            rm -rf "$dest/.git"
+            find "$dest" -type d -name .git -prune -exec rm -rf {} + || true
+          }
+
+          fetch_repo 01_praxys praxys-run/praxys main MIT
+          fetch_repo 02_rowlab_oarbit samwduncan/RowLab master MIT
+          fetch_repo 03_regmon REGmon-project/regmon main MIT
+          fetch_repo 04_openathlete openathleteorg/openathlete main AGPL-3.0
+          fetch_repo 05_wger wger-project/wger master AGPL-3.0-or-later
+          fetch_repo 06_fittrackee SamR1/FitTrackee main AGPL-3.0
+          fetch_repo 07_endurain endurain-project/endurain master AGPL-3.0
+          fetch_repo 08_360_data_athlete airbone42/360-data-athlete main MIT
+
+      - name: Generate manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/work/bundle"
+          printf 'directory\trepository\tbranch\tcommit\tcommit_date\tlicense\n' > "$ROOT/SOURCE_MANIFEST.tsv"
+          for d in "$ROOT"/repositories/*; do
+            meta="$d/SOURCE_METADATA.txt"
+            dir=$(basename "$d")
+            repo=$(sed -n 's/^repository=//p' "$meta")
+            branch=$(sed -n 's/^branch=//p' "$meta")
+            commit=$(sed -n 's/^commit=//p' "$meta")
+            date=$(sed -n 's/^commit_date=//p' "$meta")
+            license=$(sed -n 's/^license_declared=//p' "$meta")
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$dir" "$repo" "$branch" "$commit" "$date" "$license" >> "$ROOT/SOURCE_MANIFEST.tsv"
+          done
+          du -sh "$ROOT"/repositories/* > "$ROOT/metadata/DIRECTORY_SIZES.txt"
+          find "$ROOT" -type f -print0 | sort -z | xargs -0 sha256sum > "$ROOT/metadata/ALL_FILES_SHA256.txt"
+
+      - name: Build source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/work"
+          zip -q -6 -r athlete_monitoring_sources.zip bundle
+          sha256sum athlete_monitoring_sources.zip > athlete_monitoring_sources.zip.sha256
+          ls -lh athlete_monitoring_sources.zip athlete_monitoring_sources.zip.sha256
+
+      - name: Upload source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: athlete-monitoring-sources
+          path: |
+            work/athlete_monitoring_sources.zip
+            work/athlete_monitoring_sources.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
