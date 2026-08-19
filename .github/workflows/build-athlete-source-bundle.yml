@@ -1,0 +1,42 @@
+name: Build athlete monitoring source bundle
+
+on:
+  push:
+    branches:
+      - chatgpt-temp/source-bundle-20260819
+    paths:
+      - .github/workflows/build-athlete-source-bundle.yml
+      - tools/chatgpt-source-bundle/build.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout temporary builder branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install archive utility
+        shell: bash
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zip
+
+      - name: Build source bundle
+        shell: bash
+        run: bash tools/chatgpt-source-bundle/build.sh
+
+      - name: Upload final source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: athlete-monitoring-github-source-bundle
+          path: |
+            dist/*.zip
+            dist/FINAL_ZIP_SHA256.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
