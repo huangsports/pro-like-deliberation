@@ -1,0 +1,110 @@
+name: Temporary build athlete monitoring source bundle
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-athlete-source-bundle-temp.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download public source snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/work/bundle"
+          mkdir -p "$ROOT/repositories" "$ROOT/metadata"
+          LOG="$ROOT/metadata/download.log"
+          : > "$LOG"
+
+          fetch_repo() {
+            local dir="$1" repo="$2" branch="$3" license="$4"
+            local dest="$ROOT/repositories/$dir"
+            echo "[$(date -u +%FT%TZ)] Fetching $repo ($branch)" | tee -a "$LOG"
+            if ! git clone --depth 1 --single-branch --branch "$branch" --recurse-submodules --shallow-submodules "https://github.com/$repo.git" "$dest" 2>&1 | tee -a "$LOG"; then
+              echo "Recursive clone failed; retrying without submodules: $repo" | tee -a "$LOG"
+              rm -rf "$dest"
+              git clone --depth 1 --single-branch --branch "$branch" "https://github.com/$repo.git" "$dest" 2>&1 | tee -a "$LOG"
+            fi
+            (
+              cd "$dest"
+              {
+                echo "repository=$repo"
+                echo "source_url=https://github.com/$repo"
+                echo "branch=$branch"
+                echo "license_declared=$license"
+                echo "commit=$(git rev-parse HEAD)"
+                echo "commit_date=$(git show -s --format=%cI HEAD)"
+                echo "commit_subject=$(git show -s --format=%s HEAD)"
+                git submodule status --recursive 2>/dev/null | sed 's/^/submodule=/' || true
+              } > SOURCE_METADATA.txt
+            )
+            rm -rf "$dest/.git"
+            find "$dest" -type d -name .git -prune -exec rm -rf {} + || true
+          }
+
+          fetch_repo 01_praxys praxys-run/praxys main MIT
+          fetch_repo 02_rowlab_oarbit samwduncan/RowLab master MIT
+          fetch_repo 03_regmon REGmon-project/regmon main MIT
+          fetch_repo 04_openathlete openathleteorg/openathlete main AGPL-3.0
+          fetch_repo 05_wger wger-project/wger master AGPL-3.0-or-later
+          fetch_repo 06_fittrackee SamR1/FitTrackee main AGPL-3.0
+          fetch_repo 07_endurain endurain-project/endurain master AGPL-3.0
+          fetch_repo 08_360_data_athlete airbone42/360-data-athlete main MIT
+
+      - name: Generate manifest and ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/work/bundle"
+          printf 'directory\trepository\tbranch\tcommit\tcommit_date\tlicense\n' > "$ROOT/SOURCE_MANIFEST.tsv"
+          for d in "$ROOT"/repositories/*; do
+            meta="$d/SOURCE_METADATA.txt"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$(basename "$d")" \
+              "$(sed -n 's/^repository=//p' "$meta")" \
+              "$(sed -n 's/^branch=//p' "$meta")" \
+              "$(sed -n 's/^commit=//p' "$meta")" \
+              "$(sed -n 's/^commit_date=//p' "$meta")" \
+              "$(sed -n 's/^license_declared=//p' "$meta")" >> "$ROOT/SOURCE_MANIFEST.tsv"
+          done
+          du -sh "$ROOT"/repositories/* > "$ROOT/metadata/DIRECTORY_SIZES.txt"
+          find "$ROOT" -type f -print0 | sort -z | xargs -0 sha256sum > "$ROOT/metadata/ALL_FILES_SHA256.txt"
+          cd "$GITHUB_WORKSPACE/work"
+          zip -q -6 -r athlete_monitoring_sources.zip bundle
+          sha256sum athlete_monitoring_sources.zip > athlete_monitoring_sources.zip.sha256
+          ls -lh athlete_monitoring_sources.zip athlete_monitoring_sources.zip.sha256
+
+      - name: Upload source bundle
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: athlete-monitoring-sources
+          path: |
+            work/athlete_monitoring_sources.zip
+            work/athlete_monitoring_sources.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+      - name: Publish artifact locator
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          path='.bundle-artifact-info-main.json'
+          info=$(jq -n --arg run_id "$GITHUB_RUN_ID" --arg artifact_id "$ARTIFACT_ID" --arg artifact_url "$ARTIFACT_URL" --arg artifact_name 'athlete-monitoring-sources' --arg workflow_sha "$GITHUB_SHA" --arg created_at "$(date -u +%FT%TZ)" '{run_id:$run_id,artifact_id:$artifact_id,artifact_url:$artifact_url,artifact_name:$artifact_name,workflow_sha:$workflow_sha,created_at:$created_at}')
+          encoded=$(printf '%s' "$info" | base64 -w0)
+          current_sha=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/$path?ref=$GITHUB_REF_NAME" | jq -r '.sha // empty' 2>/dev/null || true)
+          payload=$(jq -n --arg message 'Record temporary source bundle artifact locator' --arg content "$encoded" --arg branch "$GITHUB_REF_NAME" --arg sha "$current_sha" '{message:$message,content:$content,branch:$branch} + (if $sha == "" then {} else {sha:$sha} end)')
+          curl -fsSL -X PUT -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' -d "$payload" "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/$path" >/dev/null
