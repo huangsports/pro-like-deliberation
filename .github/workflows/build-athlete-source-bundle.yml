@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -97,6 +97,7 @@ jobs:
           ls -lh athlete_monitoring_sources.zip athlete_monitoring_sources.zip.sha256
 
       - name: Upload source bundle
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: athlete-monitoring-sources
@@ -106,3 +107,39 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 3
+
+      - name: Publish artifact locator
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          path='.bundle-artifact-info.json'
+          info=$(jq -n \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg artifact_id "$ARTIFACT_ID" \
+            --arg artifact_url "$ARTIFACT_URL" \
+            --arg artifact_name 'athlete-monitoring-sources' \
+            --arg workflow_sha "$GITHUB_SHA" \
+            --arg created_at "$(date -u +%FT%TZ)" \
+            '{run_id:$run_id, artifact_id:$artifact_id, artifact_url:$artifact_url, artifact_name:$artifact_name, workflow_sha:$workflow_sha, created_at:$created_at}')
+          encoded=$(printf '%s' "$info" | base64 -w0)
+          current_sha=$(curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/$path?ref=$GITHUB_REF_NAME" \
+            | jq -r '.sha // empty' 2>/dev/null || true)
+          payload=$(jq -n \
+            --arg message 'Record temporary source bundle artifact locator' \
+            --arg content "$encoded" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg sha "$current_sha" \
+            '{message:$message, content:$content, branch:$branch} + (if $sha == "" then {} else {sha:$sha} end)')
+          curl -fsSL -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -d "$payload" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/$path" >/dev/null
